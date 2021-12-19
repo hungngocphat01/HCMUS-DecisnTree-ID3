@@ -43,3 +43,8 @@ for class in unique(dataset[:, end])
     @assert pure_class == class
 end
 println("Test 5 passed.")
+
+# MASTER TEST (accuracy should be 100%)
+fit(root_node, dataset)
+@assert evaluate(root_node, dataset) == 1
+println("MASTER TEST PASSED.")

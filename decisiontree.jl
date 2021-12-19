@@ -1,14 +1,13 @@
 # HUNG NGOC PHAT - 19120615
 using DelimitedFiles
-using Printf
 
 # Global dataset (initialized as null at the moment)
-dataset = nothing
+dataset = missing
 
 # Debug flag 
 verbose = false
 
-# Macro to debug printing
+# Function for debug printing
 function debug_print(args...)
     if verbose
         println(args...)
@@ -19,25 +18,27 @@ end
 mutable struct Node
     decision::Any           # Decision value at this node (IF it is a LEAF node)
     attribute::Integer      # The attribute which is used to classify at this node 
-    items::Vector           # List of items which is classified in this node
+    items::Vector           # List of items (index) which belongs to this node
     children::Vector        # List of links to the children of this node
     candidate_attrs::Vector # List of candidate attributes for this node
     jump_condition::Union{Missing, Function}    
                             # Pointer to the function which evaluates the jump condition to this node 
-                            # e.g. dataset[someattribute] == somevalue
-                            # By using a function pointer, we can handle continuous data
+                            #   e.g. dataset[someattribute] == somevalue
+                            #   By using a function pointer, we can handle continuous data
     jump_condition_str::String
                             # The representation string of the condition (for debugging purposes)
+    depth::Integer          # To perform cutting (if needed) to tackle overfitting
 end
 
 # Default constructor (initialize everything as empty)
-Node() = Node(missing, -1, Vector(), Vector(), Vector(), missing, "") 
+Node() = Node(missing, -1, Vector(), Vector(), Vector(), missing, "", 0) 
 
 # Function to construct a root node from a dataset
 function root_node_dataset(dataset)
     root_node = Node() 
     root_node.items = 1:size(dataset)[1]
     root_node.candidate_attrs = 1:(size(dataset)[2] - 1) # remove last column (class column)
+    root_node.depth = 1
     return root_node
 end
 
@@ -66,11 +67,20 @@ function split_node_by_attr(node::Node, attr::Integer)
         child.candidate_attrs = setdiff(node.candidate_attrs, [attr]) |> collect
         # Items for this child node = items in the current node, which satisfy the value condition at attr
         child.items = intersect(node.items, dataset_query(child.jump_condition)) |> collect
-        # Add the test condition for this children 
+        child.depth = node.depth + 1
+
         push!(children, child)
     end
     return children
 end
+
+
+# Acts as a wrapper for `split_node_by_attr`, but supports numerical node
+# Divide current node into 2 CATEGORIES
+# Choose the best split (with highest gain), then construct a REAL numerical classifier
+function split_numerical_node(node::Node, attr::Integer)
+end
+
 
 # Check if all items in this node belongs to only one class 
 # Also returns that class in case the node is pure
@@ -132,6 +142,7 @@ end
 function fit(node::Node, db)
     debug_print("\n--------------------------------------------")
     debug_print("Jump condition: ", node.jump_condition_str)
+    debug_print("Depth: ", node.depth)
     # If this node is a leaf node, do nothing
     if ~ismissing(node.decision)
         debug_print("Leaf node: ", node.decision)
@@ -157,12 +168,50 @@ function fit(node::Node, db)
         is_pure, decsn_class = check_purity(child)
         if is_pure
             child.decision = decsn_class
-        else 
-            # Else, recursively build its subtree
-            fit(child, dataset)
         end
+        # Else, recursively build its subtree
+        fit(child, dataset)
     end
     debug_print("Going up")
+end
+
+# Function to predict the class for a given datapoint 
+# node should be the root node of a "trained" tree
+# The class column (if present) will not be taken into account
+function predict(node::Node, row)
+    # If is leaf node: return the class 
+    if ~ismissing(node.decision)
+        debug_print("Leaf node met!")
+        return node.decision
+    end
+    debug_print("Jumping into node with attribute: ", node.attribute)
+    debug_print("Jump condition: ", node.jump_condition_str)
+    
+    # Test for each child branch of the tree
+    for child in node.children
+        # If this datapoint satisfies one of the child: jump into that child
+        if child.jump_condition(row)
+            return predict(child, row)
+        end
+    end
+end
+
+
+# Function to evaluate the model 
+# Returns the percentage [0, 1] of correcly labeled datapoints
+# Test set should be in the SAME FORMAT as dataset (class column must be included)
+function evaluate(node::Node, testset)
+    # Number of rows 
+    n = size(testset)[1]
+    # Number of correcly labeled datapoints 
+    n_correct = 0 
+    for row in eachrow(testset)
+        c = predict(node, row)
+        if c == row[end]
+            n_correct += 1
+        end
+    end
+    return n_correct / n
 end
 
 # Read the dataset from disk 

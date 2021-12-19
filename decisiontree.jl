@@ -1,4 +1,10 @@
-# HUNG NGOC PHAT - 19120615
+###################################
+# HUNG NGOC PHAT - 19120615       #
+# FIT@VNU-HCMUS, December 2021    #
+# ID3 ALGORITHM W/ NUMERICAL COLS #
+###################################
+
+# Standard Julia library for handing CSV-like files
 using DelimitedFiles
 
 # Global dataset (initialized as null at the moment)
@@ -14,6 +20,14 @@ function debug_print(args...)
     end
 end
 
+# Function to get the key of the maximum/minimum value of a dictionary 
+# cmpr_func SHOULD EITHER BE argmin or argmax
+function extreme_key(dict::Dict, cmpr_func::Function)
+    # A functional programming way (not syntatically aethestic, but offer good performance)
+    # Note: at the moment (Julia 1.6.4), keys() and values() are guaranteed to be consistent in key-value order.
+    return collect(keys(dict))[cmpr_func(values(dict) |> collect)]
+end
+
 # Data structure to represent a decision tree node
 mutable struct Node
     decision::Any           # Decision value at this node (IF it is a LEAF node)
@@ -23,11 +37,12 @@ mutable struct Node
     candidate_attrs::Vector # List of candidate attributes for this node
     jump_condition::Union{Missing, Function}    
                             # Pointer to the function which evaluates the jump condition to this node 
-                            #   e.g. dataset[someattribute] == somevalue
+                            #   e.g. somerow -> (somerow[someattribute] == somevalue)
                             #   By using a function pointer, we can handle continuous data
     jump_condition_str::String
-                            # The representation string of the condition (for debugging purposes)
+                            # The string representation of the condition (for DEBUGGING purposes)
     depth::Integer          # To perform cutting (if needed) to tackle overfitting
+                            #   For this project, it is only a DEBUGGING parameter
 end
 
 # Default constructor (initialize everything as empty)
@@ -45,6 +60,7 @@ end
 # Function to query the dataset
 # Returns a LIST OF INDICES of rows which satisfy the query 
 # func is a boolean FUNCTION which receives 1 param: each row of the dataset
+# Example usage: dataset_query(row -> row[1] == "Sunny")
 function dataset_query(query_func)
     return [i for i in 1:size(dataset)[1] if query_func(dataset[i, :])]
 end
@@ -75,26 +91,43 @@ function split_node_by_attr(node::Node, attr::Integer)
 end
 
 
-# Acts as a wrapper for `split_node_by_attr`, but supports numerical node
+# Acts as a wrapper for `split_node_by_attr`, and only supports numerical node
 # Divide current node into 2 CATEGORIES
-# Choose the best split (with highest gain), then construct a REAL numerical classifier
+# Choose the best categorical split (with lowest entropy), then construct a REAL numerical classifier
 function split_numerical_node(node::Node, attr::Integer)
 end
 
 
-# Check if all items in this node belongs to only one class 
+# Check if all items in this node belongs to only one class, OR there is no more attribute to choose from
 # Also returns that class in case the node is pure
 # Does not check for Entropy == 0 due to floating point inaccuracy
 function check_purity(node::Node)
     classes = unique(dataset[node.items, end])
     is_pure = length(classes) == 1
-    if ~is_pure 
-        return (false, missing)
+    
+    if is_pure 
+        return (true, first(classes))
     end 
-    return (true, first(classes))
+
+    # If node is not pure, but there is no more attribute to split
+    if length(node.candidate_attrs) == 0
+        subset = dataset[node.items, end]
+        counter = Dict(class => 0 for class in classes)
+        for c in eachrow(subset)
+            counter[c] += 1
+        end
+        # Get the major class in this node
+        major_class = extreme_key(counter, argmax)
+        # Pretend to be pure
+        return (true, major_class)
+    end
+
+    # If node is not pure and is divisible
+    return (false, missing)
 end
 
 # Function to calculate entropy of a node
+# Only works with CATEGORICAL DATA
 function entropy(node::Node)
     # E(S) = -sum(pi * log(pi))
     # Get all classes from the current node 
@@ -107,8 +140,8 @@ function entropy(node::Node)
     counter = Dict(c => 0 for c in classes)
     # For each row in the dataset
     for row in eachrow(dataset[node.items, :])
-        class = row[end]
-        counter[class] += 1
+        row_class = row[end]
+        counter[row_class] += 1
     end
     # Extract frequencies from counter
     frequencies = values(counter) ./ length(node.items)
@@ -138,7 +171,7 @@ end
 
 # Function to "train" a decision tree model
 # The initial model should be a ROOT NODE (already populated with all items)
-# The LAST column will ALWAYS been the class column
+# The LAST column must ALWAYS be the class column
 function fit(node::Node, db)
     debug_print("\n--------------------------------------------")
     debug_print("Jump condition: ", node.jump_condition_str)
@@ -153,9 +186,8 @@ function fit(node::Node, db)
     gains = Dict(attr => information_gain(node, attr) for attr in node.candidate_attrs)
     debug_print("Gains: ", gains)
 
-    # Find the attribute with best gain (i enjoy functional programming <(") so i wrote it like this)
-    # keys() and values() are guaranteed to be consistently ordered, at the current version of julia (1.6.4)
-    best_attr = collect(keys(gains))[argmin(values(gains) |> collect)]
+    # Find the attribute with best (highest) gain
+    best_attr = extreme_key(gains, argmax)
     debug_print("Best attr: ", best_attr)
 
     node.attribute = best_attr

@@ -11,6 +11,10 @@ using Printf
 # Global dataset (initialized as null at the moment)
 dataset = missing
 
+# Tại vì ban đầu em thử với dataset là PlayTennis.csv (categorical) vì nó dễ implement hơn 
+# Sau đó mới thêm hỗ trợ cho các thuộc tính numerical. Ngoài ra chương trình chỉ hoạt động nếu các 
+#   cột (không kể class) có kiểu dữ liệu giống nhau (hoặc là toàn bộ categorical, hoặc là toàn bộ numeric).
+
 # If dataset is numerical (this program works with both categorical & numerical data)
 numerical_mode = false
 
@@ -280,6 +284,10 @@ function predict(node::Node, row)
             return predict(child, row)
         end
     end
+    # Rare condition: this test example ended up in the test set without a similar one 
+    #   in the training set, so there is no matched rule for this example.
+    # My solution: choose a random class :) 
+    return dataset[node.items[random(1:length(node.items))], end]
 end
 
 
